@@ -16,6 +16,7 @@ jobs:
       - name: Setup MSVC (VS2022)
         uses: ilammy/msvc-dev-cmd@v1
 
+      # Clona e bootstrap do vcpkg
       - name: Bootstrap vcpkg
         shell: cmd
         run: |
@@ -23,13 +24,17 @@ jobs:
             git clone https://github.com/microsoft/vcpkg C:\vcpkg
             C:\vcpkg\bootstrap-vcpkg.bat
           )
-          echo VCPKG_ROOT=C:\vcpkg>> %GITHUB_ENV%
+
+      # Exporta VCPKG_ROOT de forma segura (PowerShell)
+      - name: Export VCPKG_ROOT
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=C:\vcpkg"
 
       - name: vcpkg version
         shell: cmd
         run: "C:\vcpkg\vcpkg.exe" version
 
-      # Instala TUDO em uma LINHA (sem crase/^), com triplet global
+      # Instala TODAS as libs em UMA LINHA (cmd), com triplet global
       - name: vcpkg install deps (x64-windows)
         shell: cmd
         run: "C:\vcpkg\vcpkg.exe" install --triplet x64-windows --recurse --clean-after-build sfml physfs glew openal-soft libogg libvorbis zlib luajit freetype libpng protobuf
@@ -59,14 +64,4 @@ jobs:
           New-Item -ItemType Directory -Force -Path package | Out-Null
           $exe = Get-ChildItem -Recurse -Path build -Filter otclient.exe | Select-Object -First 1
           if (-not $exe) { throw "otclient.exe não encontrado no diretório de build." }
-          Copy-Item $exe.FullName package\
-          if (Test-Path "data") { Copy-Item data package\data -Recurse }
-          if (Test-Path "modules") { Copy-Item modules package\modules -Recurse }
-          if (Test-Path "mods") { Copy-Item mods package\mods -Recurse }
-          Compress-Archive -Path package\* -DestinationPath otc-win64.zip -Force
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: otc-win64
-          path: otc-win64.zip
+          Copy-Item $exe.FullName p
