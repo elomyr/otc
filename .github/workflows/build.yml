@@ -1,0 +1,72 @@
+name: Build OTC Zimbadev 15.03 (Windows x64) [vcpkg]
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC (VS2022)
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Bootstrap vcpkg
+        shell: cmd
+        run: |
+          if not exist C:\vcpkg (
+            git clone https://github.com/microsoft/vcpkg C:\vcpkg
+            C:\vcpkg\bootstrap-vcpkg.bat
+          )
+          echo VCPKG_ROOT=C:\vcpkg>> %GITHUB_ENV%
+
+      - name: vcpkg version
+        shell: cmd
+        run: "C:\vcpkg\vcpkg.exe" version
+
+      # Instala TUDO em uma LINHA (sem crase/^), com triplet global
+      - name: vcpkg install deps (x64-windows)
+        shell: cmd
+        run: "C:\vcpkg\vcpkg.exe" install --triplet x64-windows --recurse --clean-after-build sfml physfs glew openal-soft libogg libvorbis zlib luajit freetype libpng protobuf
+
+      - name: Configure (CMake)
+        shell: cmd
+        env:
+          VCPKG_ROOT: C:\vcpkg
+        run: >
+          cmake -S . -B build
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DCMAKE_PREFIX_PATH=%VCPKG_ROOT%\installed\x64-windows
+          -Dprotobuf_MODULE_COMPATIBLE=ON
+          -DProtobuf_DIR=%VCPKG_ROOT%\installed\x64-windows\share\protobuf
+
+      - name: Build
+        shell: cmd
+        run: cmake --build build --config Release --parallel
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          $exe = Get-ChildItem -Recurse -Path build -Filter otclient.exe | Select-Object -First 1
+          if (-not $exe) { throw "otclient.exe não encontrado no diretório de build." }
+          Copy-Item $exe.FullName package\
+          if (Test-Path "data") { Copy-Item data package\data -Recurse }
+          if (Test-Path "modules") { Copy-Item modules package\modules -Recurse }
+          if (Test-Path "mods") { Copy-Item mods package\mods -Recurse }
+          Compress-Archive -Path package\* -DestinationPath otc-win64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: otc-win64
+          path: otc-win64.zip
