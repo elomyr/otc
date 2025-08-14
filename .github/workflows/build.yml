@@ -29,7 +29,6 @@ jobs:
       - name: Export VCPKG_ROOT
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=C:\vcpkg"
-
       - name: vcpkg version
         shell: cmd
         run: "C:\vcpkg\vcpkg.exe" version
