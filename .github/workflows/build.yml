@@ -5,40 +5,17 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build on Windows (vcpkg manifest)
+    runs-on: windows-2022
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup MSVC
+      - name: Setup MSVC (VS2022)
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 7f9e6a2f3a2a9bbd6c7b1c9e9a0c2b5b0c9e4b4a
-          runVcpkgInstall: true
-          vcpkgJsonGlob: '**/vcpkg.json'
-
-      - name: Configure with CMake
-        run: cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Package
-        run: |
-          mkdir package
-          copy build\otclient.exe package\
-          if exist data mkdir package\data
-          if exist modules mkdir package\modules
-          if exist mods mkdir package\mods
-          powershell -command "Compress-Archive -Path package\* -DestinationPath otc-win64.zip"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: otc-win64
-          path: otc-win64.zip
+      # 1) Criar o vcpkg.json na RAIZ do repo
+      - name: Create vcpkg.js
