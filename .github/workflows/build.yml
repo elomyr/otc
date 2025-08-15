@@ -5,74 +5,37 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2022   # fixa runner estável
-
+    runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup MSVC (VS2022)
+      - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      # Cache do vcpkg (opcional, mas ajuda depois)
-      - name: Cache vcpkg
-        uses: actions/cache@v4
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@v11
         with:
-          path: |
-            C:\vcpkg\installed
-            C:\vcpkg\downloads
-          key: vcpkg-${{ runner.os }}-x64-core
+          vcpkgGitCommitId: 7f9e6a2f3a2a9bbd6c7b1c9e9a0c2b5b0c9e4b4a
+          runVcpkgInstall: true
+          vcpkgJsonGlob: '**/vcpkg.json'
 
-      - name: Bootstrap vcpkg
-        shell: pwsh
-        run: |
-          if (!(Test-Path 'C:\vcpkg')) {
-            git clone https://github.com/microsoft/vcpkg C:\vcpkg
-            & "C:\vcpkg\bootstrap-vcpkg.bat"
-          }
-          "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-
-      - name: vcpkg version
-        shell: pwsh
-        run: & "C:\vcpkg\vcpkg.exe" version
-
-      # 👇 UMA LINHA, sem ^ / backticks; usa --triplet global
-      - name: vcpkg install deps (x64-windows)
-        shell: cmd
-        run: "C:\vcpkg\vcpkg.exe" install --triplet x64-windows --recurse --clean-after-build sfml physfs glew openal-soft libogg libvorbis zlib luajit freetype libpng protobuf
-
-      - name: Configure (CMake)
-        shell: cmd
-        env:
-          VCPKG_ROOT: C:\vcpkg
-        run: >
-          cmake -S . -B build
-          -G "Visual Studio 17 2022"
-          -A x64
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-          -DCMAKE_PREFIX_PATH=%VCPKG_ROOT%\installed\x64-windows
-          -Dprotobuf_MODULE_COMPATIBLE=ON
-          -DProtobuf_DIR=%VCPKG_ROOT%\installed\x64-windows\share\protobuf
+      - name: Configure with CMake
+        run: cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake
 
       - name: Build
-        shell: cmd
         run: cmake --build build --config Release --parallel
 
-      - name: Package artifact
-        shell: pwsh
+      - name: Package
         run: |
-          New-Item -ItemType Directory -Force -Path package | Out-Null
-          $exe = Get-ChildItem -Recurse -Path build -Filter otclient.exe | Select-Object -First 1
-          if (-not $exe) { throw "otclient.exe não encontrado no diretório de build." }
-          Copy-Item $exe.FullName package\
-          if (Test-Path "data") { Copy-Item data package\data -Recurse }
-          if (Test-Path "modules") { Copy-Item modules package\modules -Recurse }
-          if (Test-Path "mods") { Copy-Item mods package\mods -Recurse }
-          Compress-Archive -Path package\* -DestinationPath otc-win64.zip -Force
+          mkdir package
+          copy build\otclient.exe package\
+          if exist data mkdir package\data
+          if exist modules mkdir package\modules
+          if exist mods mkdir package\mods
+          powershell -command "Compress-Archive -Path package\* -DestinationPath otc-win64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
