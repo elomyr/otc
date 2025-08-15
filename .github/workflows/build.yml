@@ -4,18 +4,58 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  otc-build:
     name: Build on Windows (vcpkg manifest)
     runs-on: windows-2022
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup MSVC (VS2022)
+      - name: MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 1) Criar o vcpkg.json na RAIZ do repo
-      - name: Create vcpkg.js
+      # DEBUG + assert do manifest
+      - name: Show workspace and assert manifest
+        shell: pwsh
+        run: |
+          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
+          Get-ChildItem -Force $env:GITHUB_WORKSPACE | Format-Table
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\vcpkg.json")) {
+            Write-Error "vcpkg.json NÃO está na raiz!"; Get-ChildItem -Recurse -Filter vcpkg.json; exit 1
+          }
+          Get-Content "$env:GITHUB_WORKSPACE\vcpkg.json"
+
+      - name: Install vcpkg (manifest mode)
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'   # procura na raiz do workspace
+          runVcpkgInstall: true
+          triplet: x64-windows
+          # opcional: fixar commit
+          # vcpkgGitCommitId: 7f9e6a2f3a2a9bbd6c7b1c9e9a0c2b5b0c9e4b4a
+
+      - name: Configure (CMake)
+        shell: pwsh
+        run: >
+          cmake -S . -B build
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -Dprotobuf_MODULE_COMPATIBLE=ON
+          -DProtobuf_DIR="$env:VCPKG_ROOT\installed\x64-windows\share\protobuf"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          $exe = Get-ChildItem -Recurse -Path build -Filter otclient.exe | Select-Object -First 1
+          if (-not $exe) { throw "otclient.exe nã
