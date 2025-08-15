@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022   # fixa runner estável
 
     steps:
       - name: Checkout repository
@@ -16,45 +16,47 @@ jobs:
       - name: Setup MSVC (VS2022)
         uses: ilammy/msvc-dev-cmd@v1
 
-      # Cache do vcpkg para acelerar builds seguintes
+      # Cache do vcpkg (opcional, mas ajuda depois)
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: C:\vcpkg
-          key: vcpkg-cache-${{ runner.os }}-1
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\downloads
+          key: vcpkg-${{ runner.os }}-x64-core
 
-      # Clona e inicializa o vcpkg se não existir no cache
       - name: Bootstrap vcpkg
-        shell: cmd
+        shell: pwsh
         run: |
-          if not exist C:\vcpkg (
+          if (!(Test-Path 'C:\vcpkg')) {
             git clone https://github.com/microsoft/vcpkg C:\vcpkg
-            C:\vcpkg\bootstrap-vcpkg.bat
-          )
+            & "C:\vcpkg\bootstrap-vcpkg.bat"
+          }
+          "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
-      # Instala dependências necessárias do OTClient (x64)
-      - name: vcpkg install deps
+      - name: vcpkg version
+        shell: pwsh
+        run: & "C:\vcpkg\vcpkg.exe" version
+
+      # 👇 UMA LINHA, sem ^ / backticks; usa --triplet global
+      - name: vcpkg install deps (x64-windows)
         shell: cmd
-        run: |
-          C:\vcpkg\vcpkg.exe install ^
-            sfml:x64-windows ^
-            physfs:x64-windows ^
-            glew:x64-windows ^
-            openal-soft:x64-windows ^
-            libogg:x64-windows ^
-            libvorbis:x64-windows ^
-            zlib:x64-windows ^
-            luajit:x64-windows
+        run: "C:\vcpkg\vcpkg.exe" install --triplet x64-windows --recurse --clean-after-build sfml physfs glew openal-soft libogg libvorbis zlib luajit freetype libpng protobuf
 
-      # Configura e compila usando Visual Studio (sem Ninja)
       - name: Configure (CMake)
         shell: cmd
+        env:
+          VCPKG_ROOT: C:\vcpkg
         run: >
           cmake -S . -B build
           -G "Visual Studio 17 2022"
           -A x64
-          -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
           -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DCMAKE_PREFIX_PATH=%VCPKG_ROOT%\installed\x64-windows
+          -Dprotobuf_MODULE_COMPATIBLE=ON
+          -DProtobuf_DIR=%VCPKG_ROOT%\installed\x64-windows\share\protobuf
 
       - name: Build
         shell: cmd
@@ -64,7 +66,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
-          $exe = Get-ChildItem -Recurse -Path build -Filter *.exe | Where-Object { $_.Name -match "otclient" } | Select-Object -First 1
+          $exe = Get-ChildItem -Recurse -Path build -Filter otclient.exe | Select-Object -First 1
           if (-not $exe) { throw "otclient.exe não encontrado no diretório de build." }
           Copy-Item $exe.FullName package\
           if (Test-Path "data") { Copy-Item data package\data -Recurse }
