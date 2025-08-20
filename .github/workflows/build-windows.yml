@@ -1,0 +1,48 @@
+name: build-windows
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout zimbadev/otc
+        uses: actions/checkout@v4
+        with:
+          repository: zimbadev/otc
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup vcpkg
+        uses: microsoft/vcpkg-action@v1
+        with:
+          triplet: x64-windows
+
+      - name: Install dependencies (vcpkg)
+        shell: pwsh
+        run: vcpkg install sdl2:x64-windows glew:x64-windows openal-soft:x64-windows physfs:x64-windows libogg:x64-windows libvorbis:x64-windows zlib:x64-windows libpng:x64-windows openssl:x64-windows luajit:x64-windows protobuf:x64-windows
+
+      - name: Patch entergame.lua (host/port/version + RSA)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $f = "modules/client_entergame/entergame.lua"
+          if (!(Test-Path $f)) { throw "Arquivo não encontrado: $f" }
+          $s = Get-Content $f -Raw
+
+          if ($s -notmatch "BENEBRA_RSA") {
+            $rsa = @"
+-- OpenTibia RSA (modulus clássico)
+local BENEBRA_RSA = [[
+109120132967399429278860960508995541528099919306948553914
+69772573967384217386522191168647963801229204396458853433
+54106530820912449481126341631538928674113798494050936040
+70827160226827625095191833008427380552993921971861572827
+77999219455934982954034051640058834300916561947250787707
+18027019099921974970554990198807149610576551282076
