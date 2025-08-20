@@ -1,0 +1,98 @@
+name: build-windows
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout zimbadev/otc
+        uses: actions/checkout@v4
+        with:
+          repository: zimbadev/otc
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup vcpkg
+        uses: microsoft/vcpkg-action@v1
+        with:
+          triplet: x64-windows
+
+      - name: Install dependencies (vcpkg)
+        shell: pwsh
+        run: vcpkg install sdl2:x64-windows glew:x64-windows openal-soft:x64-windows physfs:x64-windows libogg:x64-windows libvorbis:x64-windows zlib:x64-windows libpng:x64-windows openssl:x64-windows luajit:x64-windows protobuf:x64-windows
+
+      - name: Patch entergame.lua (host/port/version + RSA)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $f = "modules/client_entergame/entergame.lua"
+          if (!(Test-Path $f)) { throw "Arquivo não encontrado: $f" }
+          $s = Get-Content $f -Raw
+
+          if ($s -notmatch "BENEBRA_RSA") {
+            $rsa = @"
+-- OpenTibia RSA (modulus clássico)
+local BENEBRA_RSA = [[
+109120132967399429278860960508995541528099919306948553914
+69772573967384217386522191168647963801229204396458853433
+54106530820912449481126341631538928674113798494050936040
+70827160226827625095191833008427380552993921971861572827
+77999219455934982954034051640058834300916561947250787707
+18027019099921974970554990198807149610576551282076245473
+13219764214037575069753608744005159917560642313126872853
+192075714054403712315351049304052408421
+]]
+"@
+            $s = $s -replace "EnterGame\s*=\s*\{\}", "EnterGame = {}`r`n$rsa"
+          }
+
+          if ($s -notmatch "play\.benebra\.com\.br") {
+            $block = @"
+-- Benebra: travar servidor/porta/versão e aplicar RSA OT
+EnterGame.setUniqueServer("play.benebra.com.br", 7171, 1503)
+EnterGame.setHttpLogin(false)
+g_crypt.setRSA(BENEBRA_RSA)
+"@
+            $s = $s -replace "g_ui\.displayUI\('entergame'\)", "g_ui.displayUI('entergame')`r`n$block"
+          }
+
+          if ($s -notmatch "g_crypt\.setRSA\(BENEBRA_RSA\)") {
+            $s = $s -replace "g_game\.chooseRsa\(G\.host\)", "g_game.chooseRsa(G.host)`r`n      g_crypt.setRSA(BENEBRA_RSA)"
+          }
+
+          Set-Content -Path $f -Value $s -Encoding UTF8
+          Write-Host "Patch aplicado com sucesso."
+
+      - name: Configure (CMake, MSVC generator)
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build (Release)
+        run: cmake --build build --config Release -j
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $pkg = "Benebra-OTC-1503-win64"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          if (Test-Path build\Release\otclient.exe) { Copy-Item build\Release\otclient.exe $pkg\ } else { Copy-Item build\otclient.exe $pkg\ }
+          Copy-Item data -Destination $pkg -Recurse
+          Copy-Item modules -Destination $pkg -Recurse
+          if (Test-Path packages.json) { Copy-Item packages.json $pkg\ }
+          if (Test-Path init.lua)      { Copy-Item init.lua      $pkg\ }
+          $bin = "${{ env.VCPKG_ROOT }}\installed\x64-windows\bin"
+          if (Test-Path $bin) { Copy-Item "$bin\*.dll" $pkg -ErrorAction SilentlyContinue }
+          Compress-Archive -Path "$pkg\*" -DestinationPath "otclient-windows.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: otclient-windows
+          path: otclient-windows.zip
